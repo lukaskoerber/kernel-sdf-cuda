@@ -13,4 +13,10 @@ endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+add_library(prep_loader STATIC src/prep_loader.cpp)
+target_include_directories(prep_loader PUBLIC src)
+
 add_executable(hello src/hello.cu)
+
+add_executable(dump_prep src/dump_prep.cpp)
+target_link_libraries(dump_prep PRIVATE prep_loader)
