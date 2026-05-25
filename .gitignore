@@ -1,0 +1,27 @@
+build/
+*.o
+*.obj
+*.so
+*.a
+*.dylib
+*.exe
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.ipynb_checkpoints/
+
+# Data: keep raw + test reference, ignore everything else generated
+data/prep/
+data/out/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# CUDA / compile_commands
+compile_commands.json
+.cache/
