@@ -1,0 +1,3 @@
+include README.md
+include ckpca/data/*
+include ckpca/omega_cached/*

@@ -13,9 +13,17 @@ __pycache__/
 .venv/
 .ipynb_checkpoints/
 
-# Data: keep raw + test reference, ignore everything else generated
+# Data: data/test/ is committed (small reference omegas); raw input is too large.
+data/raw/
 data/prep/
 data/out/
+
+# Reference: vendored copy of upstream ckpca, but never its embedded .git.
+reference/**/.git
+reference/**/.git/**
+reference/**/__pycache__/
+reference/**/.DS_Store
+reference/**/*.egg-info/
 
 # Editor / OS
 .vscode/
