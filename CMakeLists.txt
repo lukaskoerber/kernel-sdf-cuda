@@ -20,3 +20,8 @@ add_executable(hello src/hello.cu)
 
 add_executable(dump_prep src/dump_prep.cpp)
 target_link_libraries(dump_prep PRIVATE prep_loader)
+
+find_package(CUDAToolkit REQUIRED)
+
+add_executable(omega_linear src/omega_linear.cu)
+target_link_libraries(omega_linear PRIVATE prep_loader CUDA::cudart CUDA::cublas)
