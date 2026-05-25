@@ -20,10 +20,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from prep import (
-    compute_characteristic_signals,
-    drop_low_coverage_securities,
-)
+from prep import compute_characteristic_signals
 from cz82 import CZ82
 
 
@@ -54,9 +51,7 @@ def _load_bins(prep_dir: Path):
     return meta, Z, r, offsets, dates
 
 
-def _run_prep_inmemory(
-    parquet: Path, sample_start: str, sample_end: str, max_missing: float
-):
+def _run_prep_inmemory(parquet: Path, sample_start: str, sample_end: str):
     df = pd.read_parquet(parquet, engine="pyarrow")
     fwd = df["re"].copy()
     chars = df.drop(columns=["re", "retadj"])[CZ82]
@@ -64,7 +59,6 @@ def _run_prep_inmemory(
     chars = chars.loc[
         (d >= np.datetime64(sample_start)) & (d <= np.datetime64(sample_end))
     ]
-    chars = drop_low_coverage_securities(chars, max_missing=max_missing)
     chars = compute_characteristic_signals(chars)
     rets = fwd.reindex(chars.index)
     chars = chars.fillna(0.0)
@@ -121,7 +115,6 @@ def main() -> None:
         args.parquet,
         sample_start=meta["params"]["sample_start_date"],
         sample_end=meta["params"]["sample_end_date"],
-        max_missing=meta["params"]["max_missing"],
     )
 
     if len(chars) != meta["total_rows"]:

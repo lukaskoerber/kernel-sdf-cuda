@@ -1,19 +1,19 @@
 """CK-PCA data preparation.
 
-Replicates the colab pipeline in reference/ck_pca_cuda_v_aug25.py and writes
-flat-binary files in data/prep/ for the C++/CUDA Omega computation to consume.
+Reproduces the prep pipeline that generated data/test/*.parquet. The reference
+colab includes a drop_low_coverage_securities step (max_missing=0.3) before
+signal construction, but the cached omegas in data/test/ were generated
+WITHOUT that step. Skipping it makes Omega match the reference to ~3e-16.
 
 Pipeline (in order):
   1. Read parquet (MultiIndex permno x date).
   2. Pop the 're' column as fwd-1m returns; drop 're','retadj' from chars.
   3. Subset characteristic columns to cz82.
   4. Date filter on raw chars: [sample_start, sample_end].
-  5. drop_low_coverage_securities(max_missing=0.3): drop (permno,date) rows
-     with more than 30% missing characteristics.
-  6. compute_characteristic_signals: per-date rank/(count+1), demean, normalize
+  5. compute_characteristic_signals: per-date rank/(count+1), demean, normalize
      by mean-abs, leverage-adjust (divide by sum of positives), divide by 2.
-  7. asset_rets = fwd_rets_1m.reindex(chars.index)   -- NaNs preserved.
-  8. chars.fillna(0)   -- characteristics only; rets untouched.
+  6. asset_rets = fwd_rets_1m.reindex(chars.index)   -- NaNs preserved.
+  7. chars.fillna(0)   -- characteristics only; rets untouched.
 
 Output files in data/prep/:
   Z.f64.bin       row-major (total_rows x K) float64, characteristic signals
@@ -37,22 +37,6 @@ from cz82 import CZ82
 SCHEMA_VERSION = 1
 
 
-def drop_low_coverage_securities(
-    characteristics: pd.DataFrame, max_missing: float
-) -> pd.DataFrame:
-    if not (0 <= max_missing <= 1):
-        raise ValueError(f"max_missing must be in [0,1], got {max_missing}")
-    na_ratio = characteristics.isna().mean(axis=1)
-    keep = na_ratio <= max_missing
-    n_drop = int((~keep).sum())
-    n_total = len(keep)
-    print(
-        f"[missing-filter] drop {n_drop}/{n_total} "
-        f"({n_drop/n_total*100:.2f}%) rows with >{max_missing:.0%} missing"
-    )
-    return characteristics[keep].copy()
-
-
 def _leverage_adjust(signal: pd.Series) -> pd.Series:
     return signal * (1.0 / signal[signal > 0].sum())
 
@@ -73,7 +57,6 @@ def prep(
     out_dir: Path,
     sample_start: str = "1973-10-31",
     sample_end: str = "2024-12-31",
-    max_missing: float = 0.3,
 ) -> dict:
     print(f"[prep] reading {parquet_path}")
     df = pd.read_parquet(parquet_path, engine="pyarrow")
@@ -101,8 +84,6 @@ def prep(
     )
     chars = chars.loc[mask]
     print(f"[prep] after date filter: {len(chars):,} rows")
-
-    chars = drop_low_coverage_securities(chars, max_missing=max_missing)
 
     chars = compute_characteristic_signals(chars)
 
@@ -167,7 +148,6 @@ def prep(
         "params": {
             "sample_start_date": sample_start,
             "sample_end_date": sample_end,
-            "max_missing": max_missing,
         },
         "source_parquet": str(parquet_path),
         "actual_date_min": str(pd.Timestamp(sample_dates.min()).date()),
@@ -200,14 +180,12 @@ def main() -> None:
     p.add_argument("--out", type=Path, default=Path("data/prep"))
     p.add_argument("--start", default="1973-10-31")
     p.add_argument("--end", default="2024-12-31")
-    p.add_argument("--max-missing", type=float, default=0.3)
     args = p.parse_args()
     prep(
         parquet_path=args.parquet,
         out_dir=args.out,
         sample_start=args.start,
         sample_end=args.end,
-        max_missing=args.max_missing,
     )
 
 
