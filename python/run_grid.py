@@ -53,6 +53,9 @@ def main() -> int:
     ap.add_argument("--kernels", nargs="+", default=["rbf", "poly2"],
                     choices=["rbf", "poly2"])
     ap.add_argument("--build-dir", type=Path, default=Path("build"))
+    ap.add_argument("--engine", default="omega_grid",
+                    help="engine binary under build-dir: omega_grid (monthly) "
+                         "or omega_grid_tiled (daily / large T)")
     ap.add_argument("--prep", type=Path, default=Path("data/prep"))
     ap.add_argument("--out", type=Path, default=Path("data/out"))
     ap.add_argument("--points", type=int, default=20)
@@ -70,10 +73,10 @@ def main() -> int:
                     help="freq field in the omega filename")
     args = ap.parse_args()
 
-    engine = args.build_dir / "omega_grid"
+    engine = args.build_dir / args.engine
     if not engine.exists():
         print(f"error: engine not found at {engine}; build it first "
-              f"(cmake --build {args.build_dir} --target omega_grid)",
+              f"(cmake --build {args.build_dir} --target {args.engine})",
               file=sys.stderr)
         return 1
 
