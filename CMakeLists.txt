@@ -31,3 +31,6 @@ target_link_libraries(omega_rbf PRIVATE prep_loader CUDA::cudart CUDA::cublas)
 
 add_executable(omega_rbf_opt src/omega_rbf_opt.cu)
 target_link_libraries(omega_rbf_opt PRIVATE prep_loader CUDA::cudart CUDA::cublas)
+
+add_executable(omega_grid src/omega_grid.cu)
+target_link_libraries(omega_grid PRIVATE prep_loader CUDA::cudart CUDA::cublas)
