@@ -13,10 +13,13 @@ __pycache__/
 .venv/
 .ipynb_checkpoints/
 
-# Data: data/test/ is committed (small reference omegas); raw input is too large.
-data/raw/
-data/prep/
-data/out/
+# Data: only data/test/ is committed (small reference omegas). Everything else
+# (raw inputs, prep binaries, computed Omegas) is too large to track.
+data/*
+!data/test/
+
+# Local Claude Code settings.
+.claude/
 
 # Reference: vendored copy of upstream ckpca, but never its embedded .git.
 reference/**/.git
