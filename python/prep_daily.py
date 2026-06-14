@@ -2,8 +2,15 @@
 
 Builds the same Z / r / offsets / dates / meta binaries as python/prep.py, but at
 DAILY frequency: each period is a trading day, the cross-section is the stocks
-trading that day, Z is that month's (pre-normalized) characteristic weights held
-constant through the month, and r is the daily stock return.
+trading that day, Z is that month's (pre-normalized) characteristic weights, and
+r is the daily stock return.
+
+The within-month weight convention is selected with --weight-drift:
+  none    (default) hold the monthly weights constant through the month.
+  buyhold monthly-rebalanced buy-and-hold (Kozak, p.19): the cross-section is
+          frozen to the stocks present on each month's rebalance (first trading)
+          day, and weights drift intra-month by each stock's cumulative gross
+          return since the rebalance (no daily re-normalization).
 
 Inputs (data/raw/):
   characteristics_anom.csv   monthly (permno, date='MM/YYYY', re, <54 anomaly
@@ -38,6 +45,19 @@ import pandas as pd
 
 SCHEMA_VERSION = 1
 META_COLS = ("permno", "date", "re")  # non-characteristic columns in the CSV
+
+# The 40 anomaly characteristics used in the paper (Kozak et al. 2019 set). The
+# characteristics_anom.csv carries 54 columns; selecting these 40 makes the run
+# paper-consistent. Order is immaterial to Omega (kernels use dot products /
+# pairwise distances over the whole set) but is kept as in the paper for clarity.
+PAPER40 = [
+    "size", "value", "prof", "fscore", "debtiss", "repurch", "nissa",
+    "accruals", "growth", "aturnover", "gmargins", "ep", "cfp", "noa", "inv",
+    "invcap", "igrowth", "sgrowth", "lev", "roaa", "roea", "sp", "mom",
+    "indmom", "mom12", "momrev", "lrrev", "valuem", "nissm", "roe", "rome",
+    "strev", "ivol", "betaarb", "season", "indrrev", "ciss", "price", "age",
+    "shvol",
+]
 
 
 def load_characteristics(csv_path: Path) -> tuple[pd.DataFrame, list[str]]:
@@ -80,11 +100,66 @@ def load_daily_returns(parquet_path: Path, start: str, end: str,
     return out
 
 
+def apply_weight_drift(merged: pd.DataFrame, char_cols: list[str]) -> pd.DataFrame:
+    """Convert constant within-month weights into a monthly-rebalanced
+    buy-and-hold strategy (Kozak, p.19).
+
+    Two effects, both keyed to each month's *rebalance day* (its first trading
+    day in the sample):
+
+      1. Membership freeze. A position is only established at a rebalance, so a
+         month's cross-section is fixed to the stocks present on that month's
+         rebalance day. Mid-month entrants are dropped (they wait for the next
+         month-end rebalance to be assigned a weight); mid-month delistings just
+         end their buy-and-hold path naturally.
+
+      2. Weight drift. Holding fixed shares from the rebalance, the effective
+         weight on stock i entering day t is its rebalance weight scaled by its
+         own cumulative gross return since the rebalance:
+             w_{i,t} = z_{i,M} * prod_{s=rebalance..t-1} (1 + r_{i,s}),
+         with the product = 1 on the rebalance day. No daily re-normalization
+         (re-normalizing each day would be daily rebalancing, not buy-and-hold).
+
+    `merged` must carry permno, date, monthkey, r and the `char_cols`. Returns a
+    new frame, restricted to month-start membership and with `char_cols` scaled
+    by the drift factor, sorted (date, permno) for contiguous daily slices.
+    """
+    # 1. Membership: keep only (permno, monthkey) pairs present on the month's
+    #    first trading day.
+    first_dates = merged.groupby("monthkey")["date"].transform("min")
+    is_first_day = merged["date"].to_numpy() == first_dates.to_numpy()
+    member_idx = pd.MultiIndex.from_frame(
+        merged.loc[is_first_day, ["permno", "monthkey"]])
+    pair_idx = pd.MultiIndex.from_frame(merged[["permno", "monthkey"]])
+    merged = merged[pair_idx.isin(member_idx)]
+
+    # 2. Drift factor: per (permno, monthkey), cumprod(1+r) lagged one day so the
+    #    rebalance day itself carries factor 1.0.
+    merged = merged.sort_values(["permno", "monthkey", "date"], kind="stable")
+    cum = (1.0 + merged["r"]).groupby(
+        [merged["permno"], merged["monthkey"]], sort=False).cumprod()
+    factor = cum.groupby([merged["permno"], merged["monthkey"]], sort=False) \
+                .shift(1).fillna(1.0).to_numpy()
+    merged[char_cols] = merged[char_cols].to_numpy() * factor[:, None]
+
+    # Restore day-contiguous, permno-sorted order for the binary output.
+    return merged.sort_values(["date", "permno"], kind="stable")
+
+
 def prep_daily(chars_csv: Path, crsp_parquet: Path, out_dir: Path,
                sample_start: str, sample_end: str, char_lag_months: int,
-               return_col: str, universe_filter: bool) -> dict:
+               return_col: str, universe_filter: bool,
+               weight_drift: str = "none",
+               char_subset: list[str] | None = None) -> dict:
     print(f"[prep-daily] characteristics: {chars_csv}")
     chars, char_cols = load_characteristics(chars_csv)
+    if char_subset is not None:
+        missing = [c for c in char_subset if c not in char_cols]
+        if missing:
+            raise SystemExit(f"requested characteristics not in CSV: {missing}")
+        char_cols = list(char_subset)
+        chars = chars[char_cols]
+        print(f"[prep-daily]   subset to {len(char_cols)} characteristics")
     K = len(char_cols)
     print(f"[prep-daily]   {len(chars):,} (permno,month) rows, K={K} anomalies")
 
@@ -105,8 +180,15 @@ def prep_daily(chars_csv: Path, crsp_parquet: Path, out_dir: Path,
         raise SystemExit("no overlap between characteristics and daily returns "
                          "-- check date ranges / lag convention")
 
-    # Order so each day's cross-section is contiguous and permno-sorted.
-    merged = merged.sort_values(["date", "permno"], kind="stable")
+    if weight_drift == "buyhold":
+        rows_before = len(merged)
+        merged = apply_weight_drift(merged, char_cols)
+        print(f"[prep-daily]   buy-and-hold drift: {len(merged):,} rows after "
+              f"month-start membership freeze (dropped {rows_before - len(merged):,} "
+              f"mid-month entrants)")
+    else:
+        # Order so each day's cross-section is contiguous and permno-sorted.
+        merged = merged.sort_values(["date", "permno"], kind="stable")
 
     sample_days = np.sort(merged["date"].unique())
     T = len(sample_days)
@@ -153,6 +235,8 @@ def prep_daily(chars_csv: Path, crsp_parquet: Path, out_dir: Path,
             "char_lag_months": char_lag_months,
             "return_col": return_col,
             "universe_filter": universe_filter,
+            "weight_drift": weight_drift,
+            "char_subset": list(char_subset) if char_subset is not None else "all",
         },
         "data_source": "CRSP",
         "char_source": str(chars_csv),
@@ -185,7 +269,24 @@ def main() -> None:
     p.add_argument("--return-col", default="retadj", choices=["retadj", "ret"])
     p.add_argument("--no-universe-filter", action="store_true",
                    help="skip the shrcd/exchcd common-stock filter")
+    p.add_argument("--weight-drift", default="none", choices=["none", "buyhold"],
+                   help="none = hold monthly weights constant within the month; "
+                        "buyhold = monthly-rebalanced buy-and-hold drift with "
+                        "month-start membership freeze (Kozak, p.19)")
+    p.add_argument("--char-set", default="all", choices=["all", "paper40"],
+                   help="all = every characteristic column in the CSV; "
+                        "paper40 = the 40-characteristic Kozak et al. (2019) set")
+    p.add_argument("--char-list", default=None,
+                   help="comma-separated custom characteristic subset "
+                        "(overrides --char-set)")
     args = p.parse_args()
+
+    if args.char_list:
+        char_subset = [c.strip() for c in args.char_list.split(",") if c.strip()]
+    elif args.char_set == "paper40":
+        char_subset = PAPER40
+    else:
+        char_subset = None
     prep_daily(
         chars_csv=args.chars,
         crsp_parquet=args.crsp,
@@ -195,6 +296,8 @@ def main() -> None:
         char_lag_months=args.char_lag_months,
         return_col=args.return_col,
         universe_filter=not args.no_universe_filter,
+        weight_drift=args.weight_drift,
+        char_subset=char_subset,
     )
 
 
