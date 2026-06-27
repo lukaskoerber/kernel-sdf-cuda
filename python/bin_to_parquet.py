@@ -29,6 +29,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 DEFAULT_DATA_SOURCE = "OSAP"
 DEFAULT_FREQ = "M"
@@ -77,7 +79,11 @@ def bin_to_parquet(bin_path: Path, parquet_path: Path, prep_dir: Path) -> Path:
     omega = omega.reshape(T, T)
 
     df = pd.DataFrame(omega, index=dates, columns=dates)
-    df.to_parquet(parquet_path)
+    # Write via pyarrow directly rather than df.to_parquet: the latter's pandas
+    # validation rejects non-string (datetime) column names, but the reference
+    # ground truth in data/test/ uses datetime64 columns. from_pandas preserves
+    # that schema through the pandas metadata.
+    pq.write_table(pa.Table.from_pandas(df), parquet_path)
     return parquet_path
 
 

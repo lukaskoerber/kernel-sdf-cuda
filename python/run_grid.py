@@ -5,9 +5,9 @@ then invokes the `omega_grid` CUDA engine once per kernel. The engine loads the
 data and computes each month's GEMM a single time, reusing it across the whole
 c-grid, so a 20-point grid is far cheaper than 20 separate runs.
 
-Reference grids (reference/ck_pca_cuda_v_aug25.py):
-    rbf   : np.logspace(-4,  0, 20)
-    poly2 : np.logspace(-9, -1, 20)
+Default grids:
+    rbf   : np.logspace(-3, -1, 32)
+    poly2 : np.logspace(-9, -1, 32)
 
 Usage:
   run_grid.py [--kernels rbf poly2] [--build-dir build] [--prep data/prep]
@@ -37,7 +37,7 @@ from bin_to_parquet import (
 )
 
 GRID_DEFAULTS = {
-    "rbf":   (-4.0, 0.0),
+    "rbf":   (-3.0, -1.0),
     "poly2": (-9.0, -1.0),
 }
 
@@ -55,7 +55,7 @@ def main() -> int:
     ap.add_argument("--build-dir", type=Path, default=Path("build"))
     ap.add_argument("--prep", type=Path, default=Path("data/prep"))
     ap.add_argument("--out", type=Path, default=Path("data/out"))
-    ap.add_argument("--points", type=int, default=20)
+    ap.add_argument("--points", type=int, default=32)
     ap.add_argument("--rbf-lo", type=float, default=GRID_DEFAULTS["rbf"][0])
     ap.add_argument("--rbf-hi", type=float, default=GRID_DEFAULTS["rbf"][1])
     ap.add_argument("--poly2-lo", type=float, default=GRID_DEFAULTS["poly2"][0])
